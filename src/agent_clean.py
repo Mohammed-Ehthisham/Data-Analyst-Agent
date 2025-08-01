@@ -119,8 +119,7 @@ class DataAnalystAgent:
             # Attempt to scrape the Wikipedia table
             scraped_data = await self.web_scraper.scrape_wikipedia_table(wiki_url)
             
-            # Check if we got valid data (DataFrame or list)
-            if scraped_data is None or (hasattr(scraped_data, 'empty') and scraped_data.empty):
+            if not scraped_data:
                 print("No data returned from Wikipedia scraper")
                 return await self._analyze_without_scraping()
             
@@ -134,10 +133,8 @@ class DataAnalystAgent:
     async def _process_scraped_film_data(self, scraped_data) -> List[Any]:
         """Process actual scraped Wikipedia data"""
         try:
-            # Handle DataFrame directly if that's what we got
-            if hasattr(scraped_data, 'columns'):
-                df = scraped_data  # It's already a DataFrame
-            elif isinstance(scraped_data, list) and len(scraped_data) > 0:
+            # Convert to DataFrame and inspect structure
+            if isinstance(scraped_data, list) and len(scraped_data) > 0:
                 if isinstance(scraped_data[0], list):
                     # Data is in rows format
                     headers = scraped_data[0] if scraped_data else []
@@ -151,15 +148,12 @@ class DataAnalystAgent:
             
             print(f"Scraped data columns: {df.columns.tolist()}")
             print(f"Data shape: {df.shape}")
-            print(f"First few rows:\n{df.head()}")
             
             # Dynamically find relevant columns
             gross_col = self._find_gross_column(df)
             year_col = self._find_year_column(df)
             title_col = self._find_title_column(df)
             rank_col = self._find_rank_column(df)
-            
-            print(f"Identified columns - Gross: {gross_col}, Year: {year_col}, Title: {title_col}, Rank: {rank_col}")
             
             # Parse and analyze the data
             results = []
@@ -180,7 +174,6 @@ class DataAnalystAgent:
             plot_b64 = await self._create_plot_from_data(df, rank_col, gross_col)
             results.append(plot_b64)
             
-            print(f"Analysis results: {results}")
             return results
             
         except Exception as e:
@@ -189,92 +182,30 @@ class DataAnalystAgent:
     
     def _find_gross_column(self, df) -> str:
         """Find the column containing gross earnings"""
-        possible_names = [
-            'worldwide gross', 'gross worldwide', 'total gross', 'gross', 
-            'box office', 'earnings', 'revenue', 'worldwide', 'total',
-            'gross (worldwide)', 'worldwide box office'
-        ]
-        
-        # First try exact matches (case insensitive)
+        possible_names = ['worldwide gross', 'gross', 'box office', 'total gross', 'earnings']
         for col in df.columns:
-            col_lower = col.lower().strip()
-            for name in possible_names:
-                if col_lower == name:
-                    print(f"Found gross column (exact): {col}")
-                    return col
-        
-        # Then try partial matches
-        for col in df.columns:
-            col_lower = col.lower().strip()
-            for name in possible_names:
-                if name in col_lower or col_lower in name:
-                    print(f"Found gross column (partial): {col}")
-                    return col
-        
-        # Look for columns with dollar signs or large numbers
-        for col in df.columns:
-            if '$' in str(df[col].iloc[0] if len(df) > 0 else ''):
-                print(f"Found gross column (currency): {col}")
+            if any(name in col.lower() for name in possible_names):
                 return col
-        
-        print(f"No gross column found, using first column: {df.columns[0] if len(df.columns) > 0 else 'unknown'}")
+        # Return first numeric-looking column as fallback
+        for col in df.columns:
+            if df[col].dtype in ['int64', 'float64'] or col.lower().startswith('$'):
+                return col
         return df.columns[0] if len(df.columns) > 0 else 'gross'
     
     def _find_year_column(self, df) -> str:
         """Find the column containing release year"""
-        possible_names = ['year', 'release year', 'release', 'date released', 'year released']
-        
-        # First try exact matches
+        possible_names = ['year', 'release', 'date']
         for col in df.columns:
-            col_lower = col.lower().strip()
-            for name in possible_names:
-                if col_lower == name:
-                    print(f"Found year column (exact): {col}")
-                    return col
-        
-        # Then try partial matches
-        for col in df.columns:
-            col_lower = col.lower().strip()
-            for name in possible_names:
-                if name in col_lower:
-                    print(f"Found year column (partial): {col}")
-                    return col
-        
-        # Look for columns with 4-digit years
-        for col in df.columns:
-            try:
-                sample_val = str(df[col].iloc[0] if len(df) > 0 else '')
-                if re.search(r'\b(19|20)\d{2}\b', sample_val):
-                    print(f"Found year column (pattern): {col}")
-                    return col
-            except:
-                continue
-        
-        print(f"No year column found, using fallback: year")
+            if any(name in col.lower() for name in possible_names):
+                return col
         return 'year'
     
     def _find_title_column(self, df) -> str:
         """Find the column containing film titles"""
-        possible_names = ['title', 'film', 'movie', 'name', 'film title', 'movie title']
-        
-        # First try exact matches
+        possible_names = ['title', 'film', 'movie', 'name']
         for col in df.columns:
-            col_lower = col.lower().strip()
-            for name in possible_names:
-                if col_lower == name:
-                    print(f"Found title column (exact): {col}")
-                    return col
-        
-        # Then try partial matches
-        for col in df.columns:
-            col_lower = col.lower().strip()
-            for name in possible_names:
-                if name in col_lower:
-                    print(f"Found title column (partial): {col}")
-                    return col
-        
-        # Fallback to first column (often contains titles)
-        print(f"No title column found, using first column: {df.columns[0] if len(df.columns) > 0 else 'title'}")
+            if any(name in col.lower() for name in possible_names):
+                return col
         return df.columns[0] if len(df.columns) > 0 else 'title'
     
     def _find_rank_column(self, df) -> str:
@@ -289,114 +220,54 @@ class DataAnalystAgent:
         """Count films based on actual scraped data"""
         try:
             if gross_col not in df.columns or year_col not in df.columns:
-                print(f"Missing columns - gross: {gross_col in df.columns}, year: {year_col in df.columns}")
                 return 0
             
-            print(f"Analyzing {len(df)} films for threshold ${threshold:,} before {year_limit}")
-            
-            # Clean gross data - handle various formats
-            gross_series = df[gross_col].astype(str)
-            print(f"Sample gross values: {gross_series.head().tolist()}")
-            
-            # Remove currency symbols, commas, and extract numbers
-            gross_clean = gross_series.str.replace(r'[\$,€£¥]', '', regex=True)
-            gross_clean = gross_clean.str.replace(r'[^\d.]', '', regex=True)
-            
-            # Handle billions/millions notation
-            billions = gross_clean.str.contains('billion', case=False, na=False)
-            millions = gross_clean.str.contains('million', case=False, na=False)
-            
-            gross_numeric = pd.to_numeric(gross_clean, errors='coerce')
-            
-            # Convert to actual values
-            gross_numeric.loc[billions] *= 1_000_000_000
-            gross_numeric.loc[millions] *= 1_000_000
+            # Clean gross data - remove currency symbols and convert to numeric
+            gross_clean = df[gross_col].astype(str).str.replace(r'[\$,]', '', regex=True)
+            gross_clean = pd.to_numeric(gross_clean, errors='coerce')
             
             # Clean year data
-            year_series = df[year_col].astype(str)
-            print(f"Sample year values: {year_series.head().tolist()}")
-            
-            # Extract 4-digit year
-            year_clean = year_series.str.extract(r'(\d{4})')[0]
-            year_numeric = pd.to_numeric(year_clean, errors='coerce')
+            year_clean = df[year_col].astype(str).str.extract(r'(\d{4})')[0]
+            year_clean = pd.to_numeric(year_clean, errors='coerce')
             
             # Count matching films
-            valid_data = (~gross_numeric.isna()) & (~year_numeric.isna())
-            threshold_mask = gross_numeric >= threshold
-            year_mask = year_numeric < year_limit
+            mask = (gross_clean >= threshold) & (year_clean < year_limit)
+            count = mask.sum()
             
-            count = (valid_data & threshold_mask & year_mask).sum()
-            
-            print(f"Valid data points: {valid_data.sum()}")
-            print(f"Films over ${threshold:,}: {threshold_mask.sum()}")
-            print(f"Films before {year_limit}: {year_mask.sum()}")
-            print(f"Films over ${threshold:,} before {year_limit}: {count}")
-            
+            print(f"Found {count} films over ${threshold:,} before {year_limit}")
             return int(count)
             
         except Exception as e:
             print(f"Error counting films: {e}")
-            import traceback
-            traceback.print_exc()
             return 0
     
     async def _find_earliest_film_real(self, df, gross_col, year_col, title_col, threshold) -> str:
         """Find earliest film over threshold from actual data"""
         try:
             if not all(col in df.columns for col in [gross_col, year_col, title_col]):
-                missing = [col for col in [gross_col, year_col, title_col] if col not in df.columns]
-                print(f"Missing columns for earliest film: {missing}")
                 return "Data unavailable"
             
-            print(f"Finding earliest film over ${threshold:,}")
-            
-            # Clean gross data
-            gross_series = df[gross_col].astype(str)
-            gross_clean = gross_series.str.replace(r'[\$,€£¥]', '', regex=True)
-            gross_clean = gross_clean.str.replace(r'[^\d.]', '', regex=True)
-            
-            # Handle billions/millions
-            billions = gross_clean.str.contains('billion', case=False, na=False)
-            millions = gross_clean.str.contains('million', case=False, na=False)
-            
-            gross_numeric = pd.to_numeric(gross_clean, errors='coerce')
-            gross_numeric.loc[billions] *= 1_000_000_000
-            gross_numeric.loc[millions] *= 1_000_000
-            
-            # Clean year data
-            year_series = df[year_col].astype(str)
-            year_clean = year_series.str.extract(r'(\d{4})')[0]
-            year_numeric = pd.to_numeric(year_clean, errors='coerce')
+            # Clean data
+            gross_clean = pd.to_numeric(df[gross_col].astype(str).str.replace(r'[\$,]', '', regex=True), errors='coerce')
+            year_clean = pd.to_numeric(df[year_col].astype(str).str.extract(r'(\d{4})')[0], errors='coerce')
             
             # Filter films over threshold
-            valid_mask = (~gross_numeric.isna()) & (~year_numeric.isna()) & (gross_numeric >= threshold)
-            qualifying_films = df[valid_mask].copy()
+            mask = gross_clean >= threshold
+            qualifying_films = df[mask].copy()
             
             if qualifying_films.empty:
-                print(f"No films found over ${threshold:,}")
                 return "No films found over threshold"
             
-            print(f"Found {len(qualifying_films)} films over threshold")
-            
-            # Add cleaned data for sorting
-            qualifying_films['year_clean'] = year_numeric[valid_mask]
-            qualifying_films['gross_clean'] = gross_numeric[valid_mask]
-            
             # Sort by year and get earliest
-            earliest_idx = qualifying_films['year_clean'].idxmin()
-            earliest = qualifying_films.loc[earliest_idx]
+            qualifying_films['year_clean'] = year_clean[mask]
+            earliest = qualifying_films.loc[qualifying_films['year_clean'].idxmin()]
             
-            result = str(earliest[title_col]).strip()
-            year = earliest['year_clean']
-            gross = earliest['gross_clean']
-            
-            print(f"Earliest film over ${threshold:,}: {result} ({year}) - ${gross:,.0f}")
+            result = str(earliest[title_col])
+            print(f"Earliest film over ${threshold:,}: {result}")
             return result
             
         except Exception as e:
             print(f"Error finding earliest film: {e}")
-            import traceback
-            traceback.print_exc()
             return "Error in analysis"
     
     async def _calculate_real_correlation(self, df, rank_col) -> float:
