@@ -112,3 +112,22 @@ ehthumbs.db
 
 # Matplotlib cache
 .matplotlib/
+
+# Vercel deployment
+.vercel/
+.vercel
+
+# Additional Python cache
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Additional temporary files
+*.bak
+*.orig
+*.rej
+*~
+
+# Local development scripts (optional - you might want to keep these)
+# test_compatibility.py
+# prepare_deployment.py
