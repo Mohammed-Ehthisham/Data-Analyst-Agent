@@ -34,6 +34,12 @@ venv.bak/
 .env.local
 .env.production
 
+# API Keys and Secrets (extra protection)
+**/sk-*
+**/*api*key*
+**/*secret*
+**/*token*
+
 # IDE files
 .vscode/
 .idea/

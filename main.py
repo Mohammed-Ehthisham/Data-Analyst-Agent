@@ -110,13 +110,11 @@ async def test_endpoint(question: str) -> Union[list, dict]:
         )
 
 if __name__ == "__main__":
+    import os
+    port = int(os.environ.get("PORT", 8000))
     uvicorn.run(
         "main:app", 
         host="0.0.0.0", 
-        port=8000, 
-        reload=True,
+        port=port,
         log_level="info"
     )
-
-# Export for Vercel
-handler = app
