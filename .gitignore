@@ -137,3 +137,5 @@ dmypy.json
 # Local development scripts (optional - you might want to keep these)
 # test_compatibility.py
 # prepare_deployment.py
+
+start.py
