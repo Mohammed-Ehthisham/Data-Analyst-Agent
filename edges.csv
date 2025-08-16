@@ -1,0 +1,8 @@
+source,target
+Alice,Bob
+Bob,Carol
+Bob,David
+Carol,David
+Carol,Eve
+David,Eve
+Eve,Alice

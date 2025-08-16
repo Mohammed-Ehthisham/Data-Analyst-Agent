@@ -92,9 +92,9 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Data files (avoid committing large datasets)
+# Data files (avoid committing large datasets, but allow test files)
 data/
-*.csv
+# *.csv  # Commented out to allow test CSV files
 *.json
 *.parquet
 *.xlsx
@@ -143,3 +143,4 @@ start_server.py
 PROJECT_OVERVIEW.md
 RENDER_DEPLOYMENT.md
 .venv
+
