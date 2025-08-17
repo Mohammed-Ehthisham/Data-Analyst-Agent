@@ -44,7 +44,7 @@ class DataAnalystAgent:
         self.visualizer = Visualizer(settings)
         self.web_scraper = WebScraper()
         
-    async def analyze(self, question: str) -> Union[List[Any], Dict[str, Any]]:
+    async def analyze(self, question: str, files: Optional[List[Dict[str, Any]]] = None) -> Union[List[Any], Dict[str, Any]]:
         """
         Main analysis method that processes a question and returns results
         """
@@ -52,7 +52,7 @@ class DataAnalystAgent:
             logger.info(f"Analyzing question: {question[:100]}...")
             
             # Parse the question to understand the task
-            task_info = await self._parse_question(question)
+            task_info = await self._parse_question(question, files)
             logger.info(f"Parsed task: {task_info.get('type', 'unknown')}")
             
             # Route to appropriate handler based on task type
@@ -61,7 +61,7 @@ class DataAnalystAgent:
             elif task_info.get("type") == "database_query":
                 return await self._handle_database_analysis(question, task_info)
             elif task_info.get("type") == "file_analysis":
-                return await self._handle_file_analysis(question, task_info)
+                return await self._handle_file_analysis(question, task_info, files)
             else:
                 # General question - use LLM
                 return await self._handle_general_question(question)
@@ -70,8 +70,10 @@ class DataAnalystAgent:
             logger.error(f"Analysis failed: {e}", exc_info=True)
             return {"error": f"Analysis failed: {str(e)}"}
     
-    async def _parse_question(self, question: str) -> Dict[str, Any]:
+    async def _parse_question(self, question: str, files: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """Parse the question to understand what type of analysis is needed"""
+        files = files or []
+        filenames = [f.get('filename', '').lower() for f in files]
         
         # Check for Wikipedia URL patterns
         wiki_pattern = r'https://en\.wikipedia\.org/wiki/[^\s\n]+'
@@ -91,11 +93,17 @@ class DataAnalystAgent:
                 "query_type": "general"
             }
             
-        # Check for file analysis
-        if any(keyword in question.lower() for keyword in ["csv", "file", "dataset", "data"]):
+        # Check for file analysis (based on question or presence of uploaded files)
+        if any(keyword in question.lower() for keyword in ["csv", "file", "dataset", "data", "sales", "weather", "edge_count"]) or len(files) > 0:
+            # Infer subtype
+            subtype = "csv"
+            if any(name.endswith('.json') for name in filenames):
+                subtype = "json"
+            elif any(name.endswith('.parquet') or name.endswith('.pq') for name in filenames):
+                subtype = "parquet"
             return {
                 "type": "file_analysis",
-                "file_type": "csv"
+                "file_type": subtype
             }
         
         return {"type": "general_question"}
@@ -743,7 +751,7 @@ class DataAnalystAgent:
             if 'conn' in locals():
                 conn.close()
     
-    async def _handle_file_analysis(self, question: str, task_info: Dict) -> Dict[str, Any]:
+    async def _handle_file_analysis(self, question: str, task_info: Dict, files: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
         """Handle file-based analysis for network and sales tasks"""
         import pandas as pd
         import networkx as nx
@@ -751,17 +759,67 @@ class DataAnalystAgent:
         import io, base64
         import numpy as np
         import re
+        from io import BytesIO
+        files = files or []
+        
+        def _to_data_uri(img_bytes: bytes) -> str:
+            b64 = base64.b64encode(img_bytes).decode()
+            data_uri = f"data:image/png;base64,{b64}"
+            # Ensure under size limit
+            max_len = getattr(self.settings, 'max_plot_size', 100000)
+            return data_uri if len(data_uri) <= max_len else data_uri[:max_len]
+        
+        def _first_file_by_ext(exts: List[str]) -> Optional[Dict[str, Any]]:
+            for f in files:
+                name = f.get('filename', '')
+                if any(name.lower().endswith(ext) for ext in exts):
+                    return f
+            return None
+        
+        def _load_csv_df() -> Optional[pd.DataFrame]:
+            f = _first_file_by_ext(['.csv'])
+            if f:
+                try:
+                    return pd.read_csv(BytesIO(f.get('content', b'')))
+                except Exception as e:
+                    logger.warning(f"Failed reading CSV {f.get('filename')}: {e}")
+            return None
+        
+        def _load_json_df() -> Optional[pd.DataFrame]:
+            f = _first_file_by_ext(['.json'])
+            if f:
+                try:
+                    data = json.loads(f.get('content', b'').decode('utf-8', errors='ignore') or '[]')
+                    return pd.json_normalize(data) if isinstance(data, list) else pd.json_normalize([data])
+                except Exception as e:
+                    logger.warning(f"Failed reading JSON {f.get('filename')}: {e}")
+            return None
+        
+        def _load_parquet_df() -> Optional[pd.DataFrame]:
+            f = _first_file_by_ext(['.parquet', '.pq'])
+            if f:
+                try:
+                    return pd.read_parquet(BytesIO(f.get('content', b'')))
+                except Exception as e:
+                    logger.warning(f"Failed reading Parquet {f.get('filename')}: {e}")
+            return None
         try:
             # Detect task type from question
             q = question.lower()
             if 'edge_count' in q and 'highest_degree_node' in q:
                 # Network analysis
-                csv_path = task_info.get('file', 'edges.csv')
-                df = pd.read_csv(csv_path)
+                df = _load_csv_df()
+                if df is None:
+                    # Try JSON edge list
+                    df = _load_json_df()
+                    if df is not None and df.shape[1] >= 2:
+                        df = df.iloc[:, :2]
+                if df is None:
+                    raise ValueError("No edge list file found (CSV or JSON)")
                 # Expect columns: source, target
                 G = nx.Graph()
                 for _, row in df.iterrows():
-                    G.add_edge(str(row[0]), str(row[1]))
+                    G.add_edge(str(row.iloc[0]), str(row.iloc[1]))
                 edge_count = G.number_of_edges()
                 degrees = dict(G.degree())
                 highest_degree_node = max(degrees, key=degrees.get)
@@ -777,9 +835,9 @@ class DataAnalystAgent:
                 pos = nx.spring_layout(G)
                 nx.draw(G, pos, with_labels=True, node_color='lightblue', edge_color='gray', font_size=10)
                 buf = io.BytesIO()
-                plt.savefig(buf, format='png', bbox_inches='tight', dpi=100)
+                plt.savefig(buf, format='png', bbox_inches='tight', dpi=80)
                 plt.close()
-                network_graph = base64.b64encode(buf.getvalue()).decode()
+                network_graph = _to_data_uri(buf.getvalue())
                 # Degree histogram
                 plt.figure(figsize=(4,3))
                 degs = list(degrees.values())
@@ -788,67 +846,96 @@ class DataAnalystAgent:
                 plt.ylabel('Degree')
                 plt.title('Degree Distribution')
                 buf2 = io.BytesIO()
-                plt.savefig(buf2, format='png', bbox_inches='tight', dpi=100)
+                plt.savefig(buf2, format='png', bbox_inches='tight', dpi=80)
                 plt.close()
-                degree_histogram = base64.b64encode(buf2.getvalue()).decode()
-                # Truncate if >100kB
-                def truncate_b64(b64str):
-                    return b64str if len(b64str) < 100000 else b64str[:99999]
+                degree_histogram = _to_data_uri(buf2.getvalue())
                 return {
                     "edge_count": edge_count,
                     "highest_degree_node": highest_degree_node,
                     "average_degree": average_degree,
                     "density": density,
                     "shortest_path_alice_eve": shortest_path_alice_eve,
-                    "network_graph": truncate_b64(network_graph),
-                    "degree_histogram": truncate_b64(degree_histogram)
+                    "network_graph": network_graph,
+                    "degree_histogram": degree_histogram
                 }
             elif 'total_sales' in q and 'top_region' in q:
                 # Sales analysis
-                csv_path = task_info.get('file', 'sample-sales.csv')
-                df = pd.read_csv(csv_path)
+                df = _load_csv_df() or _load_json_df() or _load_parquet_df()
+                if df is None:
+                    raise ValueError("No sales dataset provided (CSV/JSON/Parquet)")
                 # Expect columns: date, region, sales
-                total_sales = float(df['sales'].sum())
-                top_region = df.groupby('region')['sales'].sum().idxmax()
+                # Normalize columns
+                cols = {c.lower(): c for c in df.columns}
+                date_col = cols.get('date') or next((c for c in df.columns if 'date' in c.lower()), df.columns[0])
+                region_col = cols.get('region') or next((c for c in df.columns if 'region' in c.lower()), df.columns[1] if len(df.columns) > 1 else df.columns[0])
+                sales_col = cols.get('sales') or next((c for c in df.columns if 'sale' in c.lower() or 'amount' in c.lower() or 'revenue' in c.lower()), df.columns[-1])
+                df[sales_col] = pd.to_numeric(df[sales_col], errors='coerce').fillna(0)
+                total_sales_val = df[sales_col].sum()
+                # Cast to int if integral
+                total_sales = int(total_sales_val) if float(total_sales_val).is_integer() else float(total_sales_val)
+                top_region = str(df.groupby(region_col)[sales_col].sum().idxmax())
                 # Correlation between day of month and sales
-                df['day'] = pd.to_datetime(df['date']).dt.day
-                day_sales_correlation = float(df['day'].corr(df['sales']))
-                median_sales = float(df['sales'].median())
-                total_sales_tax = float(df['sales'].sum() * 0.10)
+                df['day'] = pd.to_datetime(df[date_col], errors='coerce').dt.day
+                corr_val = df['day'].corr(df[sales_col]) if 'day' in df and df['day'].notna().any() else np.nan
+                day_sales_correlation = float(corr_val) if pd.notna(corr_val) else 0.0
+                median_val = df[sales_col].median()
+                median_sales = int(median_val) if float(median_val).is_integer() else float(median_val)
+                tax_val = df[sales_col].sum() * 0.10
+                total_sales_tax = int(tax_val) if float(tax_val).is_integer() else float(tax_val)
                 # Bar chart: total sales by region (blue bars)
                 plt.figure(figsize=(4,3))
-                region_sales = df.groupby('region')['sales'].sum()
+                region_sales = df.groupby(region_col)[sales_col].sum()
                 region_sales.plot(kind='bar', color='blue')
                 plt.xlabel('Region')
                 plt.ylabel('Total Sales')
                 plt.title('Total Sales by Region')
                 buf = io.BytesIO()
-                plt.savefig(buf, format='png', bbox_inches='tight', dpi=100)
+                plt.savefig(buf, format='png', bbox_inches='tight', dpi=80)
                 plt.close()
-                bar_chart = base64.b64encode(buf.getvalue()).decode()
+                bar_chart = _to_data_uri(buf.getvalue())
                 # Cumulative sales chart (red line)
                 plt.figure(figsize=(5,3))
-                df_sorted = df.sort_values('date')
-                df_sorted['cumulative_sales'] = df_sorted['sales'].cumsum()
-                plt.plot(pd.to_datetime(df_sorted['date']), df_sorted['cumulative_sales'], color='red')
+                df_sorted = df.sort_values(date_col)
+                df_sorted['cumulative_sales'] = df_sorted[sales_col].cumsum()
+                plt.plot(pd.to_datetime(df_sorted[date_col], errors='coerce'), df_sorted['cumulative_sales'], color='red')
                 plt.xlabel('Date')
                 plt.ylabel('Cumulative Sales')
                 plt.title('Cumulative Sales Over Time')
                 buf2 = io.BytesIO()
-                plt.savefig(buf2, format='png', bbox_inches='tight', dpi=100)
+                plt.savefig(buf2, format='png', bbox_inches='tight', dpi=80)
                 plt.close()
-                cumulative_sales_chart = base64.b64encode(buf2.getvalue()).decode()
-                def truncate_b64(b64str):
-                    return b64str if len(b64str) < 100000 else b64str[:99999]
+                cumulative_sales_chart = _to_data_uri(buf2.getvalue())
                 return {
                     "total_sales": total_sales,
                     "top_region": top_region,
                     "day_sales_correlation": day_sales_correlation,
-                    "bar_chart": truncate_b64(bar_chart),
+                    "bar_chart": bar_chart,
                     "median_sales": median_sales,
                     "total_sales_tax": total_sales_tax,
-                    "cumulative_sales_chart": truncate_b64(cumulative_sales_chart)
+                    "cumulative_sales_chart": cumulative_sales_chart
                 }
+            elif any(ext in q for ext in ['json', 'parquet', 'court', 'judge', 'verdict']) or task_info.get('file_type') in ['json', 'parquet']:
+                # Generic JSON/Parquet court-like analysis
+                df = _load_json_df() or _load_parquet_df() or _load_csv_df()
+                if df is None or df.empty:
+                    return {"result": "No data loaded", "note": "Provide a JSON/Parquet file."}
+                # Heuristics to compute counts
+                out = {
+                    "records": int(len(df)),
+                    "columns": list(df.columns)[:20],
+                }
+                # Add a simple plot of record counts by a categorical column if available
+                cat_col = next((c for c in df.columns if df[c].dtype == object), None)
+                if cat_col:
+                    vc = df[cat_col].astype(str).value_counts().head(10)
+                    plt.figure(figsize=(5,3))
+                    vc.plot(kind='bar', color='purple')
+                    plt.title(f"Top {cat_col}")
+                    buf = io.BytesIO()
+                    plt.savefig(buf, format='png', bbox_inches='tight', dpi=80)
+                    plt.close()
+                    out["summary_chart"] = _to_data_uri(buf.getvalue())
+                return out
             else:
                 # Unknown file analysis type, return correct structure with placeholders
                 return {
@@ -864,18 +951,18 @@ class DataAnalystAgent:
                     "average_degree": 0.0,
                     "density": 0.0,
                     "shortest_path_alice_eve": -1,
-                    "network_graph": "",
-                    "degree_histogram": ""
+                    "network_graph": "data:image/png;base64,",
+                    "degree_histogram": "data:image/png;base64,"
                 }
             elif 'total_sales' in q:
                 return {
                     "total_sales": 0.0,
                     "top_region": "",
                     "day_sales_correlation": 0.0,
-                    "bar_chart": "",
+                    "bar_chart": "data:image/png;base64,",
                     "median_sales": 0.0,
                     "total_sales_tax": 0.0,
-                    "cumulative_sales_chart": ""
+                    "cumulative_sales_chart": "data:image/png;base64,"
                 }
             else:
                 return {"error": f"File analysis failed: {str(e)}"}

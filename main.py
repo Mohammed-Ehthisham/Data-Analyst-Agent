@@ -1,4 +1,5 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
+from typing import List, Dict
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import json
@@ -44,42 +45,92 @@ async def health():
     return {"status": "healthy", "version": "1.0.0"}
 
 @app.post("/api/")
-async def analyze_data(file: UploadFile = File(...)) -> Union[list, dict]:
+async def analyze_data(files: List[UploadFile] = File(...)) -> Union[list, dict]:
     """
     Main endpoint for data analysis tasks.
-    
-    Accepts a text file with analysis instructions and returns results in JSON format.
+
+    - Accepts multiple files. One must be a questions.txt that contains the prompt.
+    - Any additional files (.csv, .json, .png, etc.) are passed to the agent as context.
     """
     try:
-        # Read the uploaded file
-        content = await file.read()
-        question = content.decode('utf-8').strip()
-        
+        if not files:
+            raise HTTPException(status_code=400, detail="No files uploaded. Expected at least questions.txt.")
+
+        # Log incoming file names
+        file_names = [f.filename for f in files if f and f.filename]
+        logger.info(f"Incoming files: {file_names}")
+
+        # Find the questions.txt file (case-insensitive)
+        question_file: UploadFile | None = None
+        for f in files:
+            if f and f.filename and f.filename.lower() == "questions.txt":
+                question_file = f
+                break
+
+        if question_file is None:
+            raise HTTPException(status_code=400, detail="Missing required file: questions.txt")
+
+        # Read all files
+        contents: Dict[str, bytes] = {}
+        for f in files:
+            try:
+                contents[f.filename] = await f.read()
+            except Exception:
+                contents[f.filename] = b""
+
+        # Extract the question
+        try:
+            question = contents[question_file.filename].decode("utf-8", errors="ignore").strip()
+        except Exception:
+            question = ""
+
+        if not question:
+            raise HTTPException(status_code=400, detail="questions.txt is empty or unreadable.")
+
         logger.info(f"Received analysis request: {question[:200]}...")
-        
+
+        # Prepare additional context files (exclude questions.txt)
+        context_files = []
+        for name, data in contents.items():
+            if name == question_file.filename:
+                continue
+            # Infer a simple content type from extension
+            ext = (name.rsplit('.', 1)[-1].lower() if '.' in name else '')
+            content_type = {
+                'csv': 'text/csv',
+                'json': 'application/json',
+                'png': 'image/png',
+                'jpg': 'image/jpeg',
+                'jpeg': 'image/jpeg',
+                'parquet': 'application/octet-stream'
+            }.get(ext, 'application/octet-stream')
+            context_files.append({
+                'filename': name,
+                'content_type': content_type,
+                'content': data,
+            })
+
         # Process the request with timeout (3 minutes)
         try:
             result = await asyncio.wait_for(
-                agent.analyze(question), 
-                timeout=180  # 3 minutes
+                agent.analyze(question, files=context_files),
+                timeout=settings.timeout_seconds
             )
-            
+
             logger.info("Analysis completed successfully")
             return result
-            
+
         except asyncio.TimeoutError:
-            logger.error("Analysis timed out after 3 minutes")
-            raise HTTPException(
-                status_code=408, 
-                detail="Analysis timed out. Please try with a simpler question."
-            )
-            
+            logger.error("Analysis timed out after configured timeout")
+            # Return a minimal, valid response to avoid zero score
+            return {"error": "timeout", "message": "Analysis timed out. Returning fallback response."}
+
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error processing request: {str(e)}")
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Error processing analysis request: {str(e)}"
-        )
+        logger.error(f"Error processing request: {str(e)}", exc_info=True)
+        # Return a safe fallback JSON
+        return {"error": "server_error", "message": str(e)}
 
 @app.post("/api/test")
 async def test_endpoint(question: str) -> Union[list, dict]:

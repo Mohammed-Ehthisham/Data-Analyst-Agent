@@ -35,3 +35,4 @@ aiofiles==23.2.1
 
 # Image processing
 Pillow==10.0.1
+networkx==3.3
