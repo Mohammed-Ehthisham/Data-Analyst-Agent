@@ -1,0 +1,10 @@
+Please analyze the attached sales CSV and return exactly these fields:
+- total_sales
+- top_region
+- day_sales_correlation
+- bar_chart (as data:image/png;base64,...)
+- median_sales
+- total_sales_tax (assume 10%)
+- cumulative_sales_chart (as data:image/png;base64,...)
+
+The dataset has columns: date, region, sales. Compute values accurately. Ensure the plot images are base64 data URIs and kept reasonably small. This is a CSV analysis task.
