@@ -4,14 +4,20 @@ services:
     env: python
     runtime: python-3.12.3
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn main:app -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT
+    startCommand: gunicorn main:app -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 300
     envVars:
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENAI_MODEL
-        value: gpt-4
+        value: gpt-4o
       - key: DEBUG
         value: false
       - key: PYTHONPATH
         value: .
+      - key: TIMEOUT_SECONDS
+        value: 240
+      - key: LLM_TEMPERATURE
+        value: 0.1
+      - key: CHART_MAX_SIZE_KB
+        value: 100
     healthCheckPath: /health

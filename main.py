@@ -7,7 +7,7 @@ import asyncio
 from typing import Any, Union
 import logging
 
-from src.agent import DataAnalystAgent
+from src.llm_agent import LLMDataAnalystAgent
 from src.config import get_settings
 
 # Configure logging
@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Data Analyst Agent",
-    description="An intelligent API that uses LLMs to source, prepare, analyze, and visualize data",
-    version="1.0.0"
+    title="LLM-Driven Data Analyst Agent",
+    description="An intelligent API that uses LLM system prompts for structured data analysis",
+    version="2.0.0"
 )
 
 # Add CORS middleware
@@ -30,9 +30,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize the data analyst agent
+# Initialize the LLM-driven data analyst agent
 settings = get_settings()
-agent = DataAnalystAgent(settings)
+agent = LLMDataAnalystAgent(settings)
 
 
 def _schema_fallback(question_text: str) -> dict:
@@ -92,12 +92,13 @@ def _schema_fallback(question_text: str) -> dict:
 @app.get("/")
 async def root():
     """Health check endpoint"""
-    return {"message": "Data Analyst Agent is running", "status": "healthy"}
+    logger.info("Root endpoint accessed")
+    return {"message": "LLM-Driven Data Analyst Agent is running", "status": "healthy", "version": "2.0.0"}
 
 @app.get("/health")
 async def health():
-    """Health check endpoint"""
-    return {"status": "healthy", "version": "1.0.0"}
+    """Health check endpoint for Render deployment"""
+    return {"status": "healthy", "version": "2.0.0", "model": "LLM-Driven Agent"}
 
 @app.post("/api/")
 async def analyze_data(files: List[UploadFile] = File(...)) -> Union[list, dict]:
@@ -198,7 +199,7 @@ async def test_endpoint(question: str) -> Union[list, dict]:
         
         result = await asyncio.wait_for(
             agent.analyze(question), 
-            timeout=180
+            timeout=settings.timeout_seconds  # Use consistent timeout
         )
         
         return result
@@ -217,7 +218,7 @@ async def test_endpoint(question: str) -> Union[list, dict]:
 
 if __name__ == "__main__":
     import os
-    port = int(os.environ.get("PORT", 8000))
+    port = int(os.environ.get("PORT", 8001))  # Changed default to 8001
     uvicorn.run(
         "main:app", 
         host="0.0.0.0", 

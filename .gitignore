@@ -101,10 +101,49 @@ data/
 *.pkl
 *.pickle
 
+# Sample/test data files
+sample_*.csv
+sample_*.json
+test_data/
+test_*.csv
+test_*.json
+
+# Generated charts and images
+charts/
+images/
+plots/
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+
 # Model files
 models/
 *.model
 *.pkl
+
+# LLM and API response caches
+llm_cache/
+response_cache/
+*.cache
+
+# Analysis outputs
+outputs/
+results/
+analysis_*.json
+report_*.json
+
+# Benchmark and performance files
+benchmarks/
+performance/
+*.benchmark
+*.perf
+
+# Documentation build files
+docs/_build/
+docs/build/
+site/
 
 # Mac
 .DS_Store
@@ -118,6 +157,30 @@ ehthumbs.db
 
 # Matplotlib cache
 .matplotlib/
+
+# OpenAI and API related
+openai_cache/
+api_logs/
+request_logs/
+
+# Configuration overrides
+config_override.py
+local_config.py
+dev_config.py
+
+# Deployment specific files
+deployment/
+deploy.sh
+deploy.bat
+production.env
+staging.env
+
+# Testing artifacts
+test_outputs/
+test_results/
+.test_cache/
+pytest.ini
+tox.ini
 
 # Vercel deployment
 .vercel/
@@ -133,6 +196,18 @@ dmypy.json
 *.orig
 *.rej
 *~
+
+# Generated documentation files
+REFINEMENT_SUMMARY.md
+README_ENHANCED.md
+TESTING_*.md
+
+# Test and validation scripts (not needed for deployment)
+test_llm_agent.py
+validate_submission.py
+check_render_deployment.py
+test_openai_config.py
+sample_sales.csv
 
 # Local development scripts (optional - you might want to keep these)
 # test_compatibility.py

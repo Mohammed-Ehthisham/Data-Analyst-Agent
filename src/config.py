@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     
     # OpenAI API configuration
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
-    openai_model: str = Field(default="gpt-4", alias="OPENAI_MODEL")
+    openai_model: str = Field(default="gpt-4o", alias="OPENAI_MODEL")  # Faster, better for structured output
     
     # Application settings
     debug: bool = Field(default=False, alias="DEBUG")
@@ -16,11 +16,22 @@ class Settings(BaseSettings):
     
     # API configuration
     max_request_size: int = Field(default=10 * 1024 * 1024, alias="MAX_REQUEST_SIZE")  # 10MB
-    timeout_seconds: int = Field(default=180, alias="TIMEOUT_SECONDS")  # 3 minutes
+    timeout_seconds: int = Field(default=240, alias="TIMEOUT_SECONDS")  # 4 minutes (conservative for 5min limit)
     
     # Data processing settings
     max_plot_size: int = Field(default=100000, alias="MAX_PLOT_SIZE")  # 100KB for base64 images
-    default_figure_size: tuple = (10, 6)
+    default_figure_size: tuple = (8, 6)
+    
+    # LLM-specific settings
+    llm_temperature: float = Field(default=0.1, alias="LLM_TEMPERATURE")  # Low for consistent results
+    llm_max_tokens: int = Field(default=4000, alias="LLM_MAX_TOKENS")
+    
+    # Chart generation settings
+    chart_dpi: int = Field(default=80, alias="CHART_DPI")
+    chart_max_size_kb: int = Field(default=100, alias="CHART_MAX_SIZE_KB")
+    
+    # System prompt templates
+    enable_function_calling: bool = Field(default=True, alias="ENABLE_FUNCTION_CALLING")
     
     model_config = {
         "env_file": ".env",
